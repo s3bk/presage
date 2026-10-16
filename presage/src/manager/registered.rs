@@ -462,6 +462,45 @@ impl<S: Store> Manager<S, Registered> {
         Ok(())
     }
 
+    /// Updates the user's profile information and sets a new avatar image
+    /// (JPEG/PNG bytes), replacing the current one.
+    pub async fn update_profile_with_avatar(
+        &mut self,
+        name: libsignal_service::profile_name::ProfileName<String>,
+        about: Option<String>,
+        emoji: Option<String>,
+        avatar: Vec<u8>,
+    ) -> Result<(), Error<S::Error>> {
+        let aci = self.state.data.service_ids.aci();
+        let mut account_manager = AccountManager::new(
+            self.identified_push_service(),
+            self.identified_websocket(false).await?,
+            Some(self.state.data.profile_key),
+        );
+
+        account_manager
+            .upload_versioned_profile::<_, _, String>(
+                aci,
+                name,
+                about,
+                emoji,
+                libsignal_service::push_service::AvatarWrite::NewAvatar(
+                    &mut std::io::Cursor::new(avatar),
+                ),
+                &mut rand::rng(),
+            )
+            .await?;
+
+        // Retrieve and save locally so we have the updated version
+        let profile = account_manager.retrieve_profile(aci).await?;
+        let _ = self
+            .store
+            .save_profile(aci.into(), self.state.data.profile_key, profile)
+            .await;
+
+        Ok(())
+    }
+
     pub async fn retrieve_group_avatar(
         &mut self,
         context: GroupContextV2,
